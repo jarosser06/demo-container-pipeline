@@ -1,0 +1,95 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "demoapp-task.template - Demo App Task Definition and service",
+  "Parameters": {
+    "Environment": {
+      "Description": "Application Environment",
+      "Type": "String",
+      "Default": "Development",
+      "AllowedValues": [
+        "Development",
+        "Staging",
+        "Test",
+        "Integration",
+        "PreProduction",
+        "Production",
+        "QA"
+      ]
+    },
+    "ContainerImage": {
+      "Description": "The container image for the service Task Definition.",
+      "Type": "String"
+    },
+    "ECSCluster": {
+      "Description": "The ECS Cluster to launch helpbot into",
+      "Type": "String"
+    },
+    "VPCSubnetIds": {
+      "Description": "The VPC subnet Ids for the application environment",
+      "Type": "List<AWS::EC2::Subnet::Id>"
+    },
+    "TargetGroupArn": {
+      "Type": "String",
+      "Description": "The ALB Target Group Arn"
+    }
+  },
+  "Resources": {
+    "ServiceRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ecs.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole"
+        ]
+      }
+    },
+    "DemoAppService": {
+      "DependsOn": [
+        "ServiceRole"
+      ],
+      "Type": "AWS::ECS::Service",
+      "Properties": {
+        "Cluster": { "Ref": "ECSCluster" },
+        "DesiredCount": "1",
+        "LoadBalancers": [
+          {
+            "ContainerName": { "Fn::Join": [ "-", [{ "Ref": "Environment" }, "DemoApp"]]},
+            "ContainerPort": "80",
+            "TargetGroupArn": { "Ref": "TargetGroupArn" }
+          }
+        ],
+        "Role": { "Ref": "ServiceRole" },
+        "TaskDefinition": { "Ref": "DemoAppTask" }
+      }
+    },
+    "DemoAppTask": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "ContainerDefinitions": [
+          {
+            "Name": { "Fn::Join": [ "-", [{ "Ref": "Environment" }, "DemoApp"]]},
+            "Image": { "Ref": "ContainerImage" },
+            "Cpu": "20",
+            "Memory": "500",
+            "Essential": "true",
+            "PortMappings": [
+              {
+                "ContainerPort": "80"
+              }
+            ]
+          }
+        ],
+        "Volumes": []
+      }
+    }
+  }
+}

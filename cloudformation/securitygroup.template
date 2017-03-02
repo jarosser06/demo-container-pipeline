@@ -1,0 +1,50 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "securitygroup.template - Template for the security groups.",
+  "Parameters": {
+    "VPCID": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "Select Virtual Private Cloud ID."
+    }
+  },
+  "Resources": {
+    "PublicWebSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "SecurityGroupIngress": [
+          {
+            "ToPort": 80,
+            "IpProtocol": "tcp",
+            "CidrIp": "0.0.0.0/0",
+            "FromPort": 80
+          }
+        ],
+        "VpcId": { "Ref": "VPCID" },
+        "GroupDescription": "Allow public WEB traffic."
+      }
+    },
+    "PrivateWebSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "SecurityGroupIngress": [
+          {
+            "ToPort": 61000,
+            "IpProtocol": "tcp",
+            "SourceSecurityGroupId": { "Ref": "PublicWebSecurityGroup" },
+            "FromPort": 32768
+          }
+        ],
+        "VpcId": { "Ref": "VPCID" },
+        "GroupDescription": "Allow load balancer to access ECS Cluster ephemeral ports."
+      }
+    }
+  },
+  "Outputs": {
+    "PrivateWebSecurityGroup": {
+      "Value": { "Fn::GetAtt": [ "PrivateWebSecurityGroup", "GroupId" ]}
+    },
+    "PublicWebSecurityGroup": {
+      "Value": { "Fn::GetAtt": [ "PublicWebSecurityGroup", "GroupId" ]}
+    }
+  }
+}

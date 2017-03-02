@@ -1,0 +1,341 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "docker-cd.template - Creates a Container Build and Deployment Pipeline.",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Parameters": [
+            "Environment"
+          ],
+          "Label": {
+            "default": "Application"
+          }
+        },
+        {
+          "Parameters": [
+            "Organization",
+            "OAuthToken",
+            "Repository"
+          ],
+          "Label": {
+            "default": "Github"
+          }
+        },
+        {
+          "Parameters": [
+            "ECSTaskDefinitionBucket",
+            "ECSTaskDefinitionKey",
+            "ECSTaskDefinitionParametersBucket",
+            "ECSTaskDefinitionParamtersKey",
+            "ECSTaskDefinitionStack"
+          ],
+          "Label": {
+            "default": "ECS Deployment"
+          }
+        }
+      ]
+    }
+  },
+  "Parameters": {
+    "Environment": {
+      "Default": "Development",
+      "Type": "String",
+      "Description": "Application environment this pipeline is for.",
+      "AllowedValues": [
+        "Development",
+        "Integration",
+        "PreProduction",
+        "Production",
+        "Staging",
+        "Test"
+      ]
+    },
+    "Organization": {
+      "Type": "String",
+      "Description": "Name of Github Organization the source repository is under."
+    },
+    "Repository": {
+      "Type": "String",
+      "Description": "Name of the Github Repository"
+    },
+    "OAuthToken": {
+      "Type": "String",
+      "NoEcho": true,
+      "Description": "Github OAuth token to give Code Pipeline access to the repository"
+    },
+    "Branch": {
+      "Default": "master",
+      "Type": "String",
+      "Description": "Git branch to use as the source for this pipeline."
+    },
+    "ECSTaskDefinitionBucket": {
+      "Type": "String",
+      "Description": "Valid Bucket name housing ECSTaskDefinitionKey"
+    },
+    "ECSTaskDefinitionKey": {
+      "Type": "String",
+      "Description": "Name of the ECS Task Definition CloudFormation file in Task Definition Bucket"
+    },
+    "ECSTaskDefinitionParametersBucket": {
+      "Type": "String",
+      "Description": "Valid Bucket name that holds the Task Definition Parameters file"
+    },
+    "ECSTaskDefinitionParamtersKey": {
+      "Type": "String",
+      "Description": "Bucket Key for the Task Definition Parameters file"
+    },
+    "ECSTaskDefinitionStack": {
+      "Type": "String",
+      "Description": "Name of the Task Definition Stack for this pipeline"
+    }
+  },
+  "Resources": {
+    "CodeBuildRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "codebuild.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess",
+          "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess",
+          "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryFullAccess",
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+          "arn:aws:iam::aws:policy/AWSCodePipelineReadOnlyAccess"
+        ]
+      }
+    },
+    "CloudFormationBuildRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "AWS-CloudFormation-Build-Role",
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "cloudformation.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CloudFormationAccess",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": [
+                    "cloudformation:*",
+                    "ecs:*",
+                    "ec2:*",
+                    "ecr:*",
+                    "s3:*",
+                    "logs:*"
+                  ],
+                  "Resource": "*",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "CodePipelineRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": "AWS-CodePipeline-Service",
+        "AssumeRolePolicyDocument": {
+          "Version" : "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codepipeline.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }]
+        },
+        "Policies": [
+          {
+            "PolicyName": "CloudFormationAccess",
+            "PolicyDocument": {
+              "Statement": [
+                {
+                  "Action": "cloudformation:*",
+                  "Resource": "*",
+                  "Effect": "Allow"
+                }
+              ]
+            }
+          }
+        ],
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/AWSCodePipelineFullAccess",
+          "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+          "arn:aws:iam::aws:policy/AWSCodeBuildDeveloperAccess"
+        ]
+      }
+    },
+    "S3Bucket": {
+      "Type": "AWS::S3::Bucket"
+    },
+    "ContainerBuildProject": {
+      "Type": "AWS::CodeBuild::Project",
+      "Properties": {
+        "Artifacts": {
+          "Type": "CODEPIPELINE"
+        },
+        "Environment": {
+          "ComputeType": "BUILD_GENERAL1_SMALL",
+          "EnvironmentVariables": [
+            {
+              "Name": "AWS_ACCOUNT_ID",
+              "Value": { "Ref": "AWS::AccountId" }
+            },
+            {
+              "Name": "TASK_DEFINITION_BUCKET",
+              "Value": { "Ref": "ECSTaskDefinitionBucket" }
+            },
+            {
+              "Name": "TASK_DEFINITION_KEY",
+              "Value": { "Ref": "ECSTaskDefinitionKey" }
+            },
+            {
+              "Name": "TASK_DEFINITION_PARAMETERS_BUCKET",
+              "Value": { "Ref": "ECSTaskDefinitionParametersBucket" }
+            },
+            {
+              "Name": "TASK_DEFINITION_PARAMETERS_KEY",
+              "Value": { "Ref": "ECSTaskDefinitionParamtersKey" }
+            },
+            {
+              "Name": "REPOSITORY_NAME",
+              "Value": { "Ref": "Repository" }
+            },
+            {
+              "Name": "BRANCH",
+              "Value": { "Ref": "Branch" }
+            }
+          ],
+          "Image": "aws/codebuild/docker:1.12.1",
+          "Type": "LINUX_CONTAINER"
+        },
+        "Name": { "Fn::Join": [ "-", [{"Ref": "Environment"},
+                                      {"Ref": "Organization"},
+                                      {"Ref": "Repository"},
+                                      "Build"]]},
+        "ServiceRole": {"Ref": "CodeBuildRole"},
+        "Source": {
+          "Type": "CODEPIPELINE"
+        }
+      }
+    },
+    "Pipeline": {
+      "Type": "AWS::CodePipeline::Pipeline",
+      "Properties": {
+        "ArtifactStore": {
+          "Type": "S3",
+          "Location": {"Ref": "S3Bucket"}
+        },
+        "Name": { "Fn::Join": ["-", [{"Ref": "Environment"},
+                                     {"Ref": "Organization"},
+                                     {"Ref": "Repository"},
+                                     "Docker-Pipeline"]]},
+        "RoleArn": {"Fn::GetAtt" : ["CodePipelineRole", "Arn"]},
+        "Stages": [
+          {
+            "Name": "SourceCheckout",
+            "Actions": [
+              {
+                "Name": "Source",
+                "ActionTypeId": {
+                  "Category": "Source",
+                  "Owner": "ThirdParty",
+                  "Version": "1",
+                  "Provider": "GitHub"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "ApplicationCode"
+                  }
+                ],
+                "Configuration": {
+                  "Owner": { "Ref": "Organization" },
+                  "Repo": { "Ref": "Repository" },
+                  "Branch": { "Ref": "Branch" },
+                  "OAuthToken": { "Ref": "OAuthToken" }
+                },
+                "RunOrder": "1"
+              }
+            ]
+          },
+          {
+            "Name": "ImageBuild",
+            "Actions": [
+              {
+                "InputArtifacts": [
+                  {
+                    "Name": "ApplicationCode"
+                  }
+                ],
+                "Name": "CodeBuild",
+                "ActionTypeId": {
+                  "Category": "Build",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "CodeBuild"
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "CFArtifact"
+                  }
+                ],
+                "Configuration": {
+                  "ProjectName": { "Ref": "ContainerBuildProject" }
+                },
+                "RunOrder": "1"
+              }
+            ]
+          },
+          {
+            "Name": "ApplicationDeployment",
+            "Actions": [
+              {
+                "InputArtifacts": [
+                  {
+                    "Name": "CFArtifact"
+                  }
+                ],
+                "Name": "ContainerDeploy",
+                "ActionTypeId": {
+                  "Category": "Deploy",
+                  "Owner": "AWS",
+                  "Version": "1",
+                  "Provider": "CloudFormation"
+                },
+                "Configuration": {
+                  "ActionMode": "CREATE_UPDATE",
+                  "Capabilities": "CAPABILITY_IAM",
+                  "RoleArn": { "Fn::GetAtt": ["CloudFormationBuildRole", "Arn"]},
+                  "StackName": { "Ref": "ECSTaskDefinitionStack" },
+                  "TemplateConfiguration": "CFArtifact::cf-config.json",
+                  "TemplatePath": "CFArtifact::task-definition.template"
+                },
+                "RunOrder": "1"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
